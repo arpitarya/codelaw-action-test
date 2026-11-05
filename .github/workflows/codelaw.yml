@@ -1,0 +1,42 @@
+# The proof of codelaw's GitHub Action (arpitarya/codelaw W-97): `uses:
+# arpitarya/codelaw@v0` on a fixture with one known finding — the `debugger`
+# in src/app.js, made an error by the local rule fixture/no-debugger. The run
+# annotates it, uploads SARIF to code scanning, and the last step asserts
+# exit code 1 and one SARIF result at src/app.js.
+name: codelaw
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - id: codelaw
+        uses: arpitarya/codelaw@v0
+        continue-on-error: true # the fixture's error is the point; the next step judges
+        with:
+          sarif: true
+      - name: exit 1, one SARIF result at src/app.js
+        env:
+          CODE: ${{ steps.codelaw.outputs.exit-code }}
+          SARIF: ${{ steps.codelaw.outputs.sarif-file }}
+        run: |
+          [ "$CODE" = 1 ] || { echo "::error title=proof::exit code $CODE, not 1"; exit 1; }
+          python3 - "$SARIF" <<'PY'
+          import json, sys
+          results = [r for run in json.load(open(sys.argv[1]))["runs"] for r in run["results"]]
+          uris = [l["physicalLocation"]["artifactLocation"]["uri"] for r in results for l in r["locations"]]
+          assert [r["ruleId"] for r in results] == ["fixture/no-debugger"], results
+          assert uris == ["src/app.js"], uris
+          print("the Action: exit 1, one SARIF result at", uris[0])
+          PY
